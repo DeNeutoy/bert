@@ -127,8 +127,6 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
       masked_lm_ids.append(0)
       masked_lm_weights.append(0.0)
 
-    next_sentence_label = 1 if instance.is_random_next else 0
-
     features = collections.OrderedDict()
     features["input_ids"] = create_int_feature(input_ids)
     features["input_mask"] = create_int_feature(input_mask)
@@ -136,7 +134,6 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
     features["masked_lm_positions"] = create_int_feature(masked_lm_positions)
     features["masked_lm_ids"] = create_int_feature(masked_lm_ids)
     features["masked_lm_weights"] = create_float_feature(masked_lm_weights)
-    features["next_sentence_labels"] = create_int_feature([next_sentence_label])
 
     tf_example = tf.train.Example(features=tf.train.Features(feature=features))
 
@@ -229,16 +226,7 @@ def create_instances_from_document(
   # Account for [CLS], [SEP], [SEP]
   max_num_tokens = max_seq_length - 3
 
-  # We *usually* want to fill up the entire sequence since we are padding
-  # to `max_seq_length` anyways, so short sequences are generally wasted
-  # computation. However, we *sometimes*
-  # (i.e., short_seq_prob == 0.1 == 10% of the time) want to use shorter
-  # sequences to minimize the mismatch between pre-training and fine-tuning.
-  # The `target_seq_length` is just a rough target however, whereas
-  # `max_seq_length` is a hard limit.
   target_seq_length = max_num_tokens
-  if rng.random() < short_seq_prob:
-    target_seq_length = rng.randint(2, max_num_tokens)
 
   # We DON'T just concatenate all of the tokens from a document into a long
   # sequence and choose an arbitrary split point because this would make the
@@ -253,7 +241,7 @@ def create_instances_from_document(
     segment = document[i]
     current_chunk.append(segment)
     current_length += len(segment)
-    if i == len(document) - 1 or current_length >= target_seq_length:
+    if (i == len(document) - 1 or current_length >= target_seq_length) and len(current_chunk) >= 2:
       if current_chunk:
         # `a_end` is how many segments from `current_chunk` go into the `A`
         # (first) sentence.
@@ -266,36 +254,9 @@ def create_instances_from_document(
           tokens_a.extend(current_chunk[j])
 
         tokens_b = []
-        # Random next
         is_random_next = False
-        if len(current_chunk) == 1 or rng.random() < 0.5:
-          is_random_next = True
-          target_b_length = target_seq_length - len(tokens_a)
-
-          # This should rarely go for more than one iteration for large
-          # corpora. However, just to be careful, we try to make sure that
-          # the random document is not the same as the document
-          # we're processing.
-          for _ in range(10):
-            random_document_index = rng.randint(0, len(all_documents) - 1)
-            if random_document_index != document_index:
-              break
-
-          random_document = all_documents[random_document_index]
-          random_start = rng.randint(0, len(random_document) - 1)
-          for j in range(random_start, len(random_document)):
-            tokens_b.extend(random_document[j])
-            if len(tokens_b) >= target_b_length:
-              break
-          # We didn't actually use these segments so we "put them back" so
-          # they don't go to waste.
-          num_unused_segments = len(current_chunk) - a_end
-          i -= num_unused_segments
-        # Actual next
-        else:
-          is_random_next = False
-          for j in range(a_end, len(current_chunk)):
-            tokens_b.extend(current_chunk[j])
+        for j in range(a_end, len(current_chunk)):
+          tokens_b.extend(current_chunk[j])
         truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng)
 
         assert len(tokens_a) >= 1
