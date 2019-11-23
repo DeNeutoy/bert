@@ -1,0 +1,7 @@
+
+- No pretraining with shorter sequences, only 512 for whole time.
+- Adam B_2 = 0.98 stabilises training.
+- Generally training is sensitive to Adam epsilion term.
+- Remove NSP loss.
+- DOC-SENTENCES = sample sentences contiguously from a single doc, do not cross boundaries.
+- Prefer batch_size = 2k, 7e-4 lr, 125k steps.
